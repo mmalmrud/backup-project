@@ -17,14 +17,17 @@ from rich.progress import (
 def main(config: dict[str, Any]):
     pprint.pp(config)
     rclone.set_log_level(logging.DEBUG)
-    rclone.create_remote(
-        remote_name=config["remote_name"],
-        remote_type=RemoteTypes[config["remote_type"]],
-        key_file=config["key_file"],
-        host=config["host"],
-        user=config["user"],
-    )
+    if not rclone.check_remote_existing(config["remote_name"]):
+        rclone.create_remote(
+            remote_name=config["remote_name"],
+            remote_type=RemoteTypes[config["remote_type"]],
+            key_file=config["key_file"],
+            host=config["host"],
+            user=config["user"],
+        )
 
+    about = rclone.about(config["remote_name"])
+    pprint.pp(about)
 
     mounted = False
     if config.get("mount_device") and config.get("mountpoint"):
