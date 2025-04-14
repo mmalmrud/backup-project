@@ -1,0 +1,10 @@
+[project]
+name = "backup-project"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "rclone-python>=0.1.21",
+    "ruff>=0.11.5",
+]
