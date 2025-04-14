@@ -68,17 +68,17 @@ def main(config: dict[str, Any]):
             pbar=pbar,
         )
     except Exception as e:
-        print(f"Error: {e}")
+        raise e
     finally:
         if mounted:
             os.system(f"umount {config['mountpoint']}")
             print(f"Unmounted {config['mount_device']} from {config['mountpoint']}")
-
+        print("Done!")
 
 def read_config(path: str) -> dict[str, Any]:
-    with open(path, "") as file:
+    with open(path, "r") as file:
         return {
-            line.split("=")[0].strip().lower(): "".join(line.split("=")[1:].strip())
+            line.split("=")[0].strip().lower(): "".join(line.split("=")[1:]).strip()
             for line in file
             if "=" in line
         }
