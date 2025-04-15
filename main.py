@@ -89,6 +89,7 @@ def main(config: dict[str, Any]):
         args.append("--dry-run")
 
     try:
+        start_time = datetime.datetime.now()
         log.info("Starting copy")
         rclone.copy(
             f"{config['remote_name']}:{config['remote_path']}",
@@ -96,6 +97,8 @@ def main(config: dict[str, Any]):
             ignore_existing=config.get("ignore_existing", "true") != "false",
             args=args,
         )
+        duration = datetime.datetime.now() - start_time
+        log.info(f"Copy completed, took {duration}")
     except Exception as e:
         log.error(e)
         raise e
