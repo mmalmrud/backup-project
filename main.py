@@ -1,5 +1,7 @@
+import datetime
 import logging
 import os
+from pathlib import Path
 import pprint
 import sys
 from typing import Any
@@ -14,10 +16,49 @@ from rich.progress import (
 )
 
 
-def main(config: dict[str, Any]):
-    pprint.pp(config)
+def setup_logging(
+    log_file_name: str | None = None,
+    log_path: str | None = None,
+    max_logfiles: int = 100,
+) -> logging.Logger:
+    if not log_file_name:
+        datestring = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        log_file_name = f"{datestring}_backup.log"
+
+    if not log_path:
+        log_path = os.path.join(os.path.expanduser("~"), ".backup_logs")
+    path = Path(log_path)
+    path.mkdir(parents=True, exist_ok=True)
+    if len(list(path.glob("*.log"))) > max_logfiles - 1:
+        paths = sorted(path.iterdir(), key=os.path.getmtime, reverse=True)
+        for p in paths[max_logfiles:]:
+            os.remove(p)
+
+    log = logging.getLogger()
+
+    logFormatter = logging.Formatter(
+        "%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s"
+    )
+    fileHandler = logging.FileHandler(f"{log_path}/{log_file_name}", "a")
+    fileHandler.setFormatter(logFormatter)
+    log.addHandler(fileHandler)
+
+    consoleHandler = logging.StreamHandler()
+    consoleHandler.setFormatter(logFormatter)
+    log.addHandler(consoleHandler)
     rclone.set_log_level(logging.DEBUG)
+    return log
+
+
+def main(config: dict[str, Any]):
+    log = setup_logging(
+        log_path=config.get("log_path"), log_file_name=config.get("log_file_name")
+    )
+    log.info("Starting backup")
+    log.debug(config)
+
     if not rclone.check_remote_existing(config["remote_name"]):
+        log.info("Creating remote")
         rclone.create_remote(
             remote_name=config["remote_name"],
             remote_type=RemoteTypes[config["remote_type"]],
@@ -27,15 +68,19 @@ def main(config: dict[str, Any]):
         )
 
     about = rclone.about(config["remote_name"])
-    pprint.pp(about)
+    log.debug(about)
 
     mounted = False
     if config.get("mount_device") and config.get("mountpoint"):
-        mounted = os.system(f"mount {config['mount_device']} {config['mountpoint']}") == 0
+        mounted = (
+            os.system(f"mount {config['mount_device']} {config['mountpoint']}") == 0
+        )
         if mounted:
-            print(f"Mounted {config['mount_device']} to {config['mountpoint']}")
+            log.info(f"Mounted {config['mount_device']} to {config['mountpoint']}")
         else:
-            print(f"Failed to mount {config['mount_device']} to {config['mountpoint']}")
+            log.error(
+                f"Failed to mount {config['mount_device']} to {config['mountpoint']}"
+            )
             return
 
     pbar = Progress(
@@ -45,9 +90,7 @@ def main(config: dict[str, Any]):
         TransferSpeedColumn(),
     )
 
-    args = [
-        *config.get("extra_rclone_args", "").split(",")
-    ]
+    args = [*config.get("extra_rclone_args", "").split(",")]
     if config.get("backup_dir"):
         args.append(f"--backup-dir={config['backup_dir']}")
     if config.get("exclude"):
@@ -60,6 +103,7 @@ def main(config: dict[str, Any]):
         args.append("--dry-run")
 
     try:
+        log.info("Starting copy")
         rclone.copy(
             f"{config['remote_name']}:{config['remote_path']}",
             config["local_path"],
@@ -68,12 +112,14 @@ def main(config: dict[str, Any]):
             pbar=pbar,
         )
     except Exception as e:
+        log.error(e)
         raise e
     finally:
         if mounted:
             os.system(f"umount {config['mountpoint']}")
-            print(f"Unmounted {config['mount_device']} from {config['mountpoint']}")
-        print("Done!")
+            log.info(f"Unmounted {config['mount_device']} from {config['mountpoint']}")
+        log.info("Done!")
+
 
 def read_config(path: str) -> dict[str, Any]:
     with open(path, "r") as file:
@@ -90,4 +136,4 @@ if __name__ == "__main__":
         config = read_config(sys.argv[1])
         main(config)
     else:
-        print("Error: Missing config file")
+        print("No config file specified")
