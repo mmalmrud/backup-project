@@ -6,7 +6,7 @@ import sys
 from typing import Any
 from rclone_python import rclone
 from rclone_python.remote_types import RemoteTypes
-
+from rclone_python.utils import run_rclone_cmd
 
 def setup_logging(
     log_file_name: str | None = None,
@@ -50,15 +50,15 @@ def main(config: dict[str, Any]):
     log.info("Starting backup")
     log.debug(config)
 
-    if not rclone.check_remote_existing(config["remote_name"]):
-        log.info("Creating remote")
-        rclone.create_remote(
-            remote_name=config["remote_name"],
-            remote_type=RemoteTypes[config["remote_type"]],
-            key_file=config["key_file"],
-            host=config["host"],
-            user=config["user"],
-        )
+    run_rclone_cmd("config delete", [config["remote_name"]])
+    log.info("Creating remote")
+    rclone.create_remote(
+        remote_name=config["remote_name"],
+        remote_type=RemoteTypes[config["remote_type"]],
+        key_file=config["key_file"],
+        host=config["host"],
+        user=config["user"],
+    )
 
     about = rclone.about(config["remote_name"])
     log.debug(about)
