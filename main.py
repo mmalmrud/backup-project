@@ -6,13 +6,6 @@ import sys
 from typing import Any
 from rclone_python import rclone
 from rclone_python.remote_types import RemoteTypes
-from rich.progress import (
-    Progress,
-    TextColumn,
-    BarColumn,
-    TaskProgressColumn,
-    TransferSpeedColumn,
-)
 
 
 def setup_logging(
@@ -46,7 +39,7 @@ def setup_logging(
     consoleHandler = logging.StreamHandler()
     consoleHandler.setFormatter(logFormatter)
     log.addHandler(consoleHandler)
-    rclone.set_log_level(logging.DEBUG)
+    rclone.set_log_level(logging.INFO)
     return log
 
 
@@ -83,13 +76,6 @@ def main(config: dict[str, Any]):
             )
             return
 
-    pbar = Progress(
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        TransferSpeedColumn(),
-    )
-
     args = [*config.get("extra_rclone_args", "").split(",")]
     if config.get("backup_dir"):
         args.append(f"--backup-dir={config['backup_dir']}")
@@ -109,7 +95,6 @@ def main(config: dict[str, Any]):
             config["local_path"],
             ignore_existing=config.get("ignore_existing", "true") != "false",
             args=args,
-            pbar=pbar,
         )
     except Exception as e:
         log.error(e)
