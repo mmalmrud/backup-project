@@ -63,7 +63,7 @@ def main(config: dict[str, Any]):
         rclone.copy(
             f"{config['remote_name']}:{config['remote_path']}",
             config["local_path"],
-            ignore_existing=True,
+            ignore_existing=config.get("ignore_existing", "true") != "false",
             args=args,
             pbar=pbar,
         )
