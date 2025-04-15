@@ -2,7 +2,6 @@ import datetime
 import logging
 import os
 from pathlib import Path
-import pprint
 import sys
 from typing import Any
 from rclone_python import rclone
@@ -35,6 +34,7 @@ def setup_logging(
             os.remove(p)
 
     log = logging.getLogger()
+    log.setLevel(logging.INFO)
 
     logFormatter = logging.Formatter(
         "%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s"
