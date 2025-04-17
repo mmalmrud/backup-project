@@ -13,7 +13,7 @@ def setup_logging(
     log_file_name: str | None = None,
     log_path: str | None = None,
     max_logfiles: int = 100,
-) -> (logging.Logger, str, str):
+) -> tuple[logging.Logger, str, str]:
     if not log_file_name:
         datestring = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         log_file_name = f"{datestring}_backup.log"
@@ -62,11 +62,11 @@ def main(config: dict[str, Any]):
         user=config["user"],
     )
 
+    mounted = False
+
     try:
         about = rclone.about(config["remote_name"])
         log.debug(about)
-
-        mounted = False
         if config.get("mount_device") and config.get("mount_point"):
             path = Path(config["mount_point"])
             if not path.exists():
