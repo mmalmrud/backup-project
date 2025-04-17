@@ -62,35 +62,38 @@ def main(config: dict[str, Any]):
         user=config["user"],
     )
 
-    about = rclone.about(config["remote_name"])
-    log.debug(about)
-
-    mounted = False
-    if config.get("mount_device") and config.get("mountpoint"):
-        mounted = (
-            os.system(f"mount {config['mount_device']} {config['mountpoint']}") == 0
-        )
-        if mounted:
-            log.info(f"Mounted {config['mount_device']} to {config['mountpoint']}")
-        else:
-            log.error(
-                f"Failed to mount {config['mount_device']} to {config['mountpoint']}"
-            )
-            return
-
-    args = [*config.get("extra_rclone_args", "").split(",")]
-    if config.get("backup_dir"):
-        args.append(f"--backup-dir={config['backup_dir']}")
-    if config.get("exclude"):
-        args.append(f"--exclude={config['exclude']}")
-    if config.get("bwlimit"):
-        args.append(f"--bwlimit={config['bwlimit']}")
-    if config.get("suffix"):
-        args.append(f"--suffix={config['suffix']}")
-    if config.get("dry_run") == "true":
-        args.append("--dry-run")
-
     try:
+        about = rclone.about(config["remote_name"])
+        log.debug(about)
+
+        mounted = False
+        if config.get("mount_device") and config.get("mount_point"):
+            path = Path(config["mount_point"])
+            if not path.exists():
+                raise ValueError(f"{path} does not exist")
+            exit_code = os.system(
+                f"mount {config['mount_device']} {config['mount_point']}"
+            )
+            if exit_code != 0:
+                log.error(
+                    f"Failed to mount {config['mount_device']} to {config['mount_point']}"
+                )
+                raise Exception(f"Mount exit status {exit_code}")
+            mounted = True
+            log.info(f"Mounted {config['mount_device']} to {config['mount_point']}")
+
+        args = [*config.get("extra_rclone_args", "").split(",")]
+        if config.get("backup_dir"):
+            args.append(f"--backup-dir={config['backup_dir']}")
+        if config.get("exclude"):
+            args.append(f"--exclude={config['exclude']}")
+        if config.get("bwlimit"):
+            args.append(f"--bwlimit={config['bwlimit']}")
+        if config.get("suffix"):
+            args.append(f"--suffix={config['suffix']}")
+        if config.get("dry_run") == "true":
+            args.append("--dry-run")
+
         start_time = datetime.datetime.now()
         log.info("Starting copy")
         rclone.copy(
@@ -106,19 +109,23 @@ def main(config: dict[str, Any]):
     finally:
         if mounted:
             try:
-                os.system(f"umount {config['mountpoint']}")
+                exit_code = os.system(f"umount {config['mount_point']}")
                 log.info(
-                    f"Unmounted {config['mount_device']} from {config['mountpoint']}"
+                    f"Unmounted {config['mount_device']} from {config['mount_point']}"
                 )
+                if exit_code != 0:
+                    raise Exception(f"Unmount exit status {exit_code}")
             except Exception as e:
                 log.error(
-                    f"Failed to unmount {config['mount_device']} from {config['mountpoint']}"
+                    f"Failed to unmount {config['mount_device']} from {config['mount_point']}"
                 )
                 log.error(e)
+        log.info("Copy completed")
         if config.get("remote_log_path"):
             local_log_path = f"{log_path}/{log_file_name}"
             remote_log_path = f"{config['remote_name']}:{config['remote_log_path']}"
             try:
+                log.info(f"Copying {local_log_path} to {remote_log_path}")
                 rclone.copy(local_log_path, remote_log_path, ignore_existing=True)
                 log.info(f"Copied {local_log_path} to {remote_log_path}")
             except Exception as e:
@@ -130,7 +137,7 @@ def main(config: dict[str, Any]):
 def read_config(path: str) -> dict[str, Any]:
     with open(path, "r") as file:
         return {
-            line.split("=")[0].strip().lower(): "".join(line.split("=")[1:]).strip()
+            line.split("=")[0].strip().lower(): "=".join(line.split("=")[1:]).strip()
             for line in file
             if "=" in line
         }
