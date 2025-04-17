@@ -8,11 +8,12 @@ from rclone_python import rclone
 from rclone_python.remote_types import RemoteTypes
 from rclone_python.utils import run_rclone_cmd
 
+
 def setup_logging(
     log_file_name: str | None = None,
     log_path: str | None = None,
     max_logfiles: int = 100,
-) -> logging.Logger:
+) -> (logging.Logger, str, str):
     if not log_file_name:
         datestring = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         log_file_name = f"{datestring}_backup.log"
@@ -32,7 +33,8 @@ def setup_logging(
     logFormatter = logging.Formatter(
         "%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s"
     )
-    fileHandler = logging.FileHandler(f"{log_path}/{log_file_name}", "a")
+    log_file_path = f"{log_path}/{log_file_name}"
+    fileHandler = logging.FileHandler(log_file_path, "a")
     fileHandler.setFormatter(logFormatter)
     log.addHandler(fileHandler)
 
@@ -40,11 +42,11 @@ def setup_logging(
     consoleHandler.setFormatter(logFormatter)
     log.addHandler(consoleHandler)
     rclone.set_log_level(logging.INFO)
-    return log
+    return log, log_path, log_file_name
 
 
 def main(config: dict[str, Any]):
-    log = setup_logging(
+    log, log_path, log_file_name = setup_logging(
         log_path=config.get("log_path"), log_file_name=config.get("log_file_name")
     )
     log.info("Starting backup")
@@ -101,12 +103,28 @@ def main(config: dict[str, Any]):
         log.info(f"Copy completed, took {duration}")
     except Exception as e:
         log.error(e)
-        raise e
     finally:
         if mounted:
-            os.system(f"umount {config['mountpoint']}")
-            log.info(f"Unmounted {config['mount_device']} from {config['mountpoint']}")
-        log.info("Done!")
+            try:
+                os.system(f"umount {config['mountpoint']}")
+                log.info(
+                    f"Unmounted {config['mount_device']} from {config['mountpoint']}"
+                )
+            except Exception as e:
+                log.error(
+                    f"Failed to unmount {config['mount_device']} from {config['mountpoint']}"
+                )
+                log.error(e)
+        if config.get("remote_log_path"):
+            local_log_path = f"{log_path}/{log_file_name}"
+            remote_log_path = f"{config['remote_name']}:{config['remote_log_path']}"
+            try:
+                rclone.copy(local_log_path, remote_log_path, ignore_existing=True)
+                log.info(f"Copied {local_log_path} to {remote_log_path}")
+            except Exception as e:
+                log.error(f"Failed to copy {local_log_path} to {remote_log_path}")
+                log.error(e)
+        log.info("Done")
 
 
 def read_config(path: str) -> dict[str, Any]:
