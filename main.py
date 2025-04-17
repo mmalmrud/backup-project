@@ -71,15 +71,21 @@ def main(config: dict[str, Any]):
             path = Path(config["mount_point"])
             if not path.exists():
                 raise ValueError(f"{path} does not exist")
-            exit_code = os.system(
-                f"mount {config['mount_device']} {config['mount_point']}"
-            )
-            if exit_code != 0:
-                log.error(
-                    f"Failed to mount {config['mount_device']} to {config['mount_point']}"
-                )
-                raise Exception(f"Mount exit status {exit_code}")
-            mounted = True
+            # Check if the mount point is already mounted
+            with open("/proc/mounts", "r") as mounts_file:
+                if any(config["mount_point"] in line for line in mounts_file):
+                    log.info(f"{config['mount_point']} is already mounted")
+                    mounted = True
+                else:
+                    exit_code = os.system(
+                        f"mount {config['mount_device']} {config['mount_point']}"
+                    )
+                    if exit_code != 0:
+                        log.error(
+                            f"Failed to mount {config['mount_device']} to {config['mount_point']}"
+                        )
+                        raise Exception(f"Mount exit status {exit_code}")
+                    mounted = True
             log.info(f"Mounted {config['mount_device']} to {config['mount_point']}")
 
         args = [*config.get("extra_rclone_args", "").split(",")]
