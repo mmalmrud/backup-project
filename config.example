@@ -1,6 +1,7 @@
 remote_type=sftp
 remote_name=my_remote
 host=<Remote host>
+port=<Remote port>
 user=<Remote user>
 key_file=/my/key/file/path
 

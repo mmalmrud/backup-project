@@ -67,6 +67,7 @@ def main(config: dict[str, Any]):
         remote_type=RemoteTypes[config["remote_type"]],
         key_file=config["key_file"],
         host=config["host"],
+        port=config["port"],
         user=config["user"],
     )
 
@@ -153,7 +154,7 @@ def read_config(path: str) -> dict[str, Any]:
         return {
             line.split("=")[0].strip().lower(): "=".join(line.split("=")[1:]).strip()
             for line in file
-            if "=" in line
+            if "=" in line and line.strip()[0] != "#"
         }
 
 
