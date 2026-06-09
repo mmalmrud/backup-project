@@ -2,6 +2,7 @@ import datetime
 import logging
 import os
 from pathlib import Path
+import shutil
 import smtplib
 import ssl
 import sys
@@ -90,6 +91,31 @@ def send_email_notification(
         server.send_message(message)
 
 
+def _bytes_to_human_readable(size: int) -> str:
+    units = ["B", "KB", "MB", "GB", "TB", "PB"]
+    value = float(size)
+    for unit in units:
+        if value < 1024.0 or unit == units[-1]:
+            return f"{value:.2f} {unit}"
+        value /= 1024.0
+    return f"{size} B"
+
+
+def log_disk_usage(path: str, log: logging.Logger, label: str = "Disk usage") -> tuple[int, int, int]:
+    total, used, free = shutil.disk_usage(path)
+    used_percent = (used / total * 100) if total else 0.0
+    log.info(
+        "%s for %s: total=%s used=%s free=%s used_percent=%.2f%%",
+        label,
+        path,
+        _bytes_to_human_readable(total),
+        _bytes_to_human_readable(used),
+        _bytes_to_human_readable(free),
+        used_percent,
+    )
+    return total, used, free
+
+
 def main(config: dict[str, Any]):
     log, log_path, log_file_name = setup_logging(
         log_path=config.get("log_path"), log_file_name=config.get("log_file_name")
@@ -117,6 +143,8 @@ def main(config: dict[str, Any]):
     )
 
     mounted = False
+    session_usage_path = config.get("mount_point") or config.get("local_path")
+    initial_used_bytes: int | None = None
 
     try:
         about = rclone.about(config["remote_name"])
@@ -154,6 +182,17 @@ def main(config: dict[str, Any]):
         if config.get("dry_run") == "true":
             args.append("--dry-run")
 
+        if session_usage_path:
+            try:
+                _, initial_used_bytes, _ = log_disk_usage(
+                    session_usage_path,
+                    log,
+                    "Disk usage before backup",
+                )
+            except Exception as e:
+                log.error(f"Failed to read pre-backup disk usage for {session_usage_path}")
+                log.error(e)
+
         start_time = datetime.datetime.now()
         log.info("Starting copy")
         rclone.copy(
@@ -168,6 +207,30 @@ def main(config: dict[str, Any]):
         backup_success = False
         log.error(e)
     finally:
+        if session_usage_path and initial_used_bytes is not None:
+            try:
+                _, final_used_bytes, _ = log_disk_usage(
+                    session_usage_path,
+                    log,
+                    "Disk usage after backup",
+                )
+                added_bytes = final_used_bytes - initial_used_bytes
+                if added_bytes >= 0:
+                    log.info(
+                        "Backup session added %s on %s",
+                        _bytes_to_human_readable(added_bytes),
+                        session_usage_path,
+                    )
+                else:
+                    log.info(
+                        "Backup session freed %s on %s",
+                        _bytes_to_human_readable(abs(added_bytes)),
+                        session_usage_path,
+                    )
+            except Exception as e:
+                log.error(f"Failed to read post-backup disk usage for {session_usage_path}")
+                log.error(e)
+
         if mounted:
             try:
                 exit_code = os.system(f"umount {config['mount_point']}")
