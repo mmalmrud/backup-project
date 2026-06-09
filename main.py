@@ -1,120 +1,22 @@
 import datetime
 import logging
-import os
 from pathlib import Path
-import shutil
-import smtplib
-import ssl
+import runpy
 import sys
 from typing import Any
-from email.message import EmailMessage
+
 from rclone_python import rclone
 from rclone_python.remote_types import RemoteTypes
 from rclone_python.utils import run_rclone_cmd
 from requests import get
 
+from disk import ensure_mounted, unmount
+from log import format_size, log_disk_usage, setup_logging
+from rclone import prepare_rclone_args
 
-def setup_logging(
-    log_file_name: str | None = None,
-    log_path: str | None = None,
-    max_logfiles: int = 100,
-) -> tuple[logging.Logger, str, str]:
-    if not log_file_name:
-        datestring = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        log_file_name = f"{datestring}_backup.log"
-
-    if not log_path:
-        log_path = os.path.join(os.path.expanduser("~"), ".backup_logs")
-    path = Path(log_path)
-    path.mkdir(parents=True, exist_ok=True)
-    if len(list(path.glob("*.log"))) > max_logfiles - 1:
-        paths = sorted(path.iterdir(), key=os.path.getmtime, reverse=True)
-        for p in paths[max_logfiles:]:
-            os.remove(p)
-
-    log = logging.getLogger()
-    log.setLevel(logging.INFO)
-
-    logFormatter = logging.Formatter(
-        "%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s"
-    )
-    log_file_path = f"{log_path}/{log_file_name}"
-    fileHandler = logging.FileHandler(log_file_path, "a")
-    fileHandler.setFormatter(logFormatter)
-    log.addHandler(fileHandler)
-
-    consoleHandler = logging.StreamHandler()
-    consoleHandler.setFormatter(logFormatter)
-    log.addHandler(consoleHandler)
-    rclone.set_log_level(logging.INFO)
-    return log, log_path, log_file_name
-
-
-def send_email_notification(
-    config: dict[str, Any],
-    subject: str,
-    body: str,
-    log: logging.Logger,
-) -> None:
-    required_keys = ["smtp_username", "smtp_password", "smtp_to"]
-    missing = [key for key in required_keys if not config.get(key)]
-    if missing:
-        log.info(
-            "Email notification skipped. Missing SMTP config keys: %s",
-            ", ".join(missing),
-        )
-        return
-
-    smtp_host = config.get("smtp_host", "smtp.gmail.com")
-    smtp_port = int(config.get("smtp_port", "587"))
-    smtp_username = config["smtp_username"]
-    smtp_password = config["smtp_password"]
-    smtp_from = config.get("smtp_from", smtp_username)
-    recipients = [recipient.strip() for recipient in config["smtp_to"].split(",") if recipient.strip()]
-
-    if not recipients:
-        log.info("Email notification skipped. No recipients configured in smtp_to.")
-        return
-
-    message = EmailMessage()
-    message["Subject"] = subject
-    message["From"] = smtp_from
-    message["To"] = ", ".join(recipients)
-    message.set_content(body)
-
-    context = ssl.create_default_context()
-    with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
-        server.ehlo()
-        server.starttls(context=context)
-        server.ehlo()
-        server.login(smtp_username, smtp_password)
-        server.send_message(message)
-
-
-def _bytes_to_human_readable(size: int) -> str:
-    units = ["B", "KB", "MB", "GB", "TB", "PB"]
-    value = float(size)
-    for unit in units:
-        if value < 1024.0 or unit == units[-1]:
-            return f"{value:.2f} {unit}"
-        value /= 1024.0
-    return f"{size} B"
-
-
-def log_disk_usage(path: str, log: logging.Logger, label: str = "Disk usage") -> tuple[int, int, int]:
-    total, used, free = shutil.disk_usage(path)
-    used_percent = (used / total * 100) if total else 0.0
-    log.info(
-        "%s for %s: total=%s used=%s free=%s used_percent=%.2f%%",
-        label,
-        path,
-        _bytes_to_human_readable(total),
-        _bytes_to_human_readable(used),
-        _bytes_to_human_readable(free),
-        used_percent,
-    )
-    return total, used, free
-
+send_email_notification = runpy.run_path(
+    str(Path(__file__).with_name("email.py"))
+)["send_email_notification"]
 
 def main(config: dict[str, Any]):
     log, log_path, log_file_name = setup_logging(
@@ -150,37 +52,13 @@ def main(config: dict[str, Any]):
         about = rclone.about(config["remote_name"])
         log.debug(about)
         if config.get("mount_device") and config.get("mount_point"):
-            path = Path(config["mount_point"])
-            if not path.exists():
-                raise ValueError(f"{path} does not exist")
-            # Check if the mount point is already mounted
-            with open("/proc/mounts", "r") as mounts_file:
-                if any(config["mount_point"] in line for line in mounts_file):
-                    log.info(f"{config['mount_point']} is already mounted")
-                    mounted = True
-                else:
-                    exit_code = os.system(
-                        f"mount {config['mount_device']} {config['mount_point']}"
-                    )
-                    if exit_code != 0:
-                        log.error(
-                            f"Failed to mount {config['mount_device']} to {config['mount_point']}"
-                        )
-                        raise Exception(f"Mount exit status {exit_code}")
-                    mounted = True
-            log.info(f"Mounted {config['mount_device']} to {config['mount_point']}")
+            mounted = ensure_mounted(
+                config["mount_device"],
+                config["mount_point"],
+                log,
+            )
 
-        args = [*config.get("extra_rclone_args", "").split(",")]
-        if config.get("backup_dir"):
-            args.append(f"--backup-dir={config['backup_dir']}")
-        if config.get("exclude"):
-            args.append(f"--exclude={config['exclude']}")
-        if config.get("bwlimit"):
-            args.append(f"--bwlimit={config['bwlimit']}")
-        if config.get("suffix"):
-            args.append(f"--suffix={config['suffix']}")
-        if config.get("dry_run") == "true":
-            args.append("--dry-run")
+        args = prepare_rclone_args(config)
 
         if session_usage_path:
             try:
@@ -218,13 +96,13 @@ def main(config: dict[str, Any]):
                 if added_bytes >= 0:
                     log.info(
                         "Backup session added %s on %s",
-                        _bytes_to_human_readable(added_bytes),
+                        format_size(added_bytes),
                         session_usage_path,
                     )
                 else:
                     log.info(
                         "Backup session freed %s on %s",
-                        _bytes_to_human_readable(abs(added_bytes)),
+                        format_size(abs(added_bytes)),
                         session_usage_path,
                     )
             except Exception as e:
@@ -233,12 +111,7 @@ def main(config: dict[str, Any]):
 
         if mounted:
             try:
-                exit_code = os.system(f"umount {config['mount_point']}")
-                log.info(
-                    f"Unmounted {config['mount_device']} from {config['mount_point']}"
-                )
-                if exit_code != 0:
-                    raise Exception(f"Unmount exit status {exit_code}")
+                unmount(config["mount_device"], config["mount_point"], log)
             except Exception as e:
                 backup_success = False
                 log.error(
