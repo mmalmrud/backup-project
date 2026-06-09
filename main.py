@@ -2,8 +2,11 @@ import datetime
 import logging
 import os
 from pathlib import Path
+import smtplib
+import ssl
 import sys
 from typing import Any
+from email.message import EmailMessage
 from rclone_python import rclone
 from rclone_python.remote_types import RemoteTypes
 from rclone_python.utils import run_rclone_cmd
@@ -46,10 +49,52 @@ def setup_logging(
     return log, log_path, log_file_name
 
 
+def send_email_notification(
+    config: dict[str, Any],
+    subject: str,
+    body: str,
+    log: logging.Logger,
+) -> None:
+    required_keys = ["smtp_username", "smtp_password", "smtp_to"]
+    missing = [key for key in required_keys if not config.get(key)]
+    if missing:
+        log.info(
+            "Email notification skipped. Missing SMTP config keys: %s",
+            ", ".join(missing),
+        )
+        return
+
+    smtp_host = config.get("smtp_host", "smtp.gmail.com")
+    smtp_port = int(config.get("smtp_port", "587"))
+    smtp_username = config["smtp_username"]
+    smtp_password = config["smtp_password"]
+    smtp_from = config.get("smtp_from", smtp_username)
+    recipients = [recipient.strip() for recipient in config["smtp_to"].split(",") if recipient.strip()]
+
+    if not recipients:
+        log.info("Email notification skipped. No recipients configured in smtp_to.")
+        return
+
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = smtp_from
+    message["To"] = ", ".join(recipients)
+    message.set_content(body)
+
+    context = ssl.create_default_context()
+    with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
+        server.ehlo()
+        server.starttls(context=context)
+        server.ehlo()
+        server.login(smtp_username, smtp_password)
+        server.send_message(message)
+
+
 def main(config: dict[str, Any]):
     log, log_path, log_file_name = setup_logging(
         log_path=config.get("log_path"), log_file_name=config.get("log_file_name")
     )
+    backup_success = True
     log.info("Starting backup")
     log.debug(config)
 
@@ -120,6 +165,7 @@ def main(config: dict[str, Any]):
         duration = datetime.datetime.now() - start_time
         log.info(f"Copy completed, took {duration}")
     except Exception as e:
+        backup_success = False
         log.error(e)
     finally:
         if mounted:
@@ -131,6 +177,7 @@ def main(config: dict[str, Any]):
                 if exit_code != 0:
                     raise Exception(f"Unmount exit status {exit_code}")
             except Exception as e:
+                backup_success = False
                 log.error(
                     f"Failed to unmount {config['mount_device']} from {config['mount_point']}"
                 )
@@ -144,8 +191,24 @@ def main(config: dict[str, Any]):
                 rclone.copy(local_log_path, remote_log_path, ignore_existing=True)
                 log.info(f"Copied {local_log_path} to {remote_log_path}")
             except Exception as e:
+                backup_success = False
                 log.error(f"Failed to copy {local_log_path} to {remote_log_path}")
                 log.error(e)
+
+        log_file_path = f"{log_path}/{log_file_name}"
+        for handler in logging.getLogger().handlers:
+            handler.flush()
+
+        subject = "Successful backup" if backup_success else "Failed backup"
+        try:
+            with open(log_file_path, "r", encoding="utf-8", errors="replace") as f:
+                log_content = f.read()
+            send_email_notification(config, subject, log_content, log)
+            log.info("Backup email notification sent")
+        except Exception as e:
+            log.error("Failed to send backup email notification")
+            log.error(e)
+
         log.info("Done")
 
 

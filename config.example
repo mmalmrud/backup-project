@@ -14,5 +14,13 @@ bwlimit=5M
 suffix=.backup
 dry_run=true
 
-mount_device/dev/disk/by-id...
-mountpoint=/mountpoint
+mount_device=/dev/disk/by-id/...
+mount_point=/mountpoint
+
+# Email notification settings (Gmail app password)
+smtp_host=smtp.gmail.com
+smtp_port=587
+smtp_username=you@gmail.com
+smtp_password=your_gmail_app_password
+smtp_from=you@gmail.com
+smtp_to=you@gmail.com
