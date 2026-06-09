@@ -1,7 +1,5 @@
 import datetime
 import logging
-from pathlib import Path
-import runpy
 import sys
 from typing import Any
 
@@ -11,12 +9,9 @@ from rclone_python.utils import run_rclone_cmd
 from requests import get
 
 from disk import ensure_mounted, unmount
+from email_aux import send_email_notification
 from log import format_size, log_disk_usage, setup_logging
 from rclone import prepare_rclone_args
-
-send_email_notification = runpy.run_path(
-    str(Path(__file__).with_name("email.py"))
-)["send_email_notification"]
 
 def main(config: dict[str, Any]):
     log, log_path, log_file_name = setup_logging(
